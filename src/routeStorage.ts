@@ -121,6 +121,22 @@ const writeRoutes = (routes: SavedRoute[]) => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
 };
 
+const updateRoutes = (updater: (routes: SavedRoute[]) => SavedRoute[]) => {
+    if (!canUseLocalStorage()) {
+        return [];
+    }
+
+    try {
+        migrateLegacyRoute();
+        const routes = updater(readRoutes()).slice(0, MAX_SAVED_ROUTES);
+        writeRoutes(routes);
+        return routes;
+    } catch (error) {
+        console.warn('Unable to update saved efbDPP routes.', error);
+        return [];
+    }
+};
+
 const migrateLegacyRoute = () => {
     const legacyRawValue = window.localStorage.getItem(LEGACY_STORAGE_KEY);
 
@@ -184,6 +200,25 @@ export const loadSavedRoutes = () => {
 };
 
 export const loadLatestSavedRoute = () => loadSavedRoutes()[0] ?? null;
+
+export const deleteSavedRoute = (id: string) =>
+    updateRoutes(routes => routes.filter(route => route.id !== id));
+
+export const renameSavedRoute = (id: string, fileName: string) =>
+    updateRoutes(routes =>
+        routes.map(route => (route.id === id ? { ...route, fileName } : route)),
+    );
+
+export const moveSavedRouteToTop = (id: string) =>
+    updateRoutes(routes => {
+        const route = routes.find(candidate => candidate.id === id);
+
+        if (!route) {
+            return routes;
+        }
+
+        return [route, ...routes.filter(candidate => candidate.id !== id)];
+    });
 
 export const clearSavedRoutes = () => {
     if (!canUseLocalStorage()) {

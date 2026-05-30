@@ -24,17 +24,25 @@
                 <strong>Recent routes</strong>
                 <div class="route-file-list">
                     {#each savedRoutes as savedRoute}
-                        <button
+                        <div
                             class:route-file--active={ savedRoute.id === selectedSavedRouteId }
                             class="route-file"
-                            type="button"
-                            on:click={ () => loadSavedRoute(savedRoute) }
                         >
-                            <span>{ savedRoute.fileName }</span>
-                            <small>
-                                { savedRoute.route.waypoints.length } pts · { formatSavedTime(savedRoute.savedAt) }
-                            </small>
-                        </button>
+                            <button class="route-file-main" type="button" on:click={ () => loadSavedRoute(savedRoute) }>
+                                <span>{ savedRoute.fileName }</span>
+                                <small>
+                                    { savedRoute.route.waypoints.length } pts · { formatSavedTime(savedRoute.savedAt) }
+                                </small>
+                            </button>
+                            <div class="route-file-actions">
+                                <button type="button" on:click={ () => renameRoute(savedRoute) }>
+                                    Rename
+                                </button>
+                                <button type="button" on:click={ () => removeSavedRoute(savedRoute) }>
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
                     {/each}
                 </div>
                 <small>Latest { savedRoutes.length } of 10 uploads are kept on this device.</small>
@@ -62,64 +70,6 @@
                             <span>{ index + 1 }. { waypoint.name }</span>
                             <small>{ waypoint.latRaw } / { waypoint.lonRaw }</small>
                         </button>
-                        <button
-                            class="forecast-button"
-                            disabled={ loadingForecastKey === waypointKey(waypoint) }
-                            type="button"
-                            on:click={ () => showForecast(waypoint) }
-                        >
-                            { loadingForecastKey === waypointKey(waypoint) ? 'Loading' : 'Forecast' }
-                        </button>
-
-                        {#if activeForecastKey === waypointKey(waypoint)}
-                            <div class="forecast-panel">
-                                {#if forecastStatus}
-                                    <p class:status-error={ forecastHasError } class="status">
-                                        { forecastStatus }
-                                    </p>
-                                {/if}
-
-                                {#if forecastByWaypoint[waypointKey(waypoint)]}
-                                    <div class="forecast-table">
-                                        <div class="forecast-row forecast-row--head">
-                                            <span>Time</span>
-                                            <span>WX</span>
-                                            <span>Temp</span>
-                                            <span>Wind</span>
-                                            <span>Gust</span>
-                                            <span>Rain</span>
-                                            <span>Pressure</span>
-                                            <span>RH</span>
-                                            <span>Dew</span>
-                                            <span>Cloud base</span>
-                                            <span>Icing</span>
-                                            <span>Turb</span>
-                                        </div>
-                                        {#each forecastByWaypoint[waypointKey(waypoint)].rows as row}
-                                            <div class="forecast-row">
-                                                <span>{ row.timeLabel }</span>
-                                                <span>{ formatForecastCode(row.weatherCode) }</span>
-                                                <span>{ formatForecastValue(row.tempC) }°C</span>
-                                                <span>
-                                                    { formatForecastValue(row.windKt) } kt
-                                                    {#if row.windDir !== null}
-                                                        / { formatForecastValue(row.windDir) }°
-                                                    {/if}
-                                                </span>
-                                                <span>{ formatForecastValue(row.gustKt) } kt</span>
-                                                <span>{ formatForecastValue(row.precipMm, 1) } mm</span>
-                                                <span>{ formatForecastValue(row.pressureHpa) } hPa</span>
-                                                <span>{ formatForecastValue(row.humidityPct) }%</span>
-                                                <span>{ formatForecastValue(row.dewPointC) }°C</span>
-                                                <span>{ formatForecastValue(row.cloudBaseFt) } ft</span>
-                                                <span>{ formatForecastValue(row.icing, 1) }</span>
-                                                <span>{ formatForecastValue(row.turbulence, 1) }</span>
-                                            </div>
-                                        {/each}
-                                    </div>
-                                {/if}
-                            </div>
-                        {/if}
                     </div>
                 {/each}
             </div>
@@ -137,18 +87,14 @@
     import { routeToGpx } from './gpxExport';
     import {
         clearSavedRoutes,
+        deleteSavedRoute,
         loadLatestSavedRoute,
         loadSavedRoutes,
+        moveSavedRouteToTop,
+        renameSavedRoute,
         saveRoute,
         type SavedRoute,
     } from './routeStorage';
-    import {
-        formatForecastCode,
-        formatForecastValue,
-        loadWaypointForecast,
-        waypointKey,
-        type WaypointForecast,
-    } from './waypointForecast';
 
     const { title } = config;
 
@@ -159,11 +105,6 @@
     let routeLine: L.Polyline | null = null;
     let savedRoutes: SavedRoute[] = [];
     let selectedSavedRouteId = '';
-    let forecastByWaypoint: Record<string, WaypointForecast> = {};
-    let activeForecastKey = '';
-    let loadingForecastKey = '';
-    let forecastStatus = '';
-    let forecastHasError = false;
 
     const formatSavedTime = (savedAt: string) =>
         new Intl.DateTimeFormat(undefined, {
@@ -228,10 +169,6 @@
     const setActiveRoute = (savedRoute: SavedRoute, source: 'saved' | 'uploaded') => {
         route = savedRoute.route;
         selectedSavedRouteId = savedRoute.id;
-        forecastByWaypoint = {};
-        activeForecastKey = '';
-        forecastStatus = '';
-        forecastHasError = false;
         drawRoute(savedRoute.route);
         hasError = false;
         status =
@@ -245,7 +182,44 @@
     };
 
     const loadSavedRoute = (savedRoute: SavedRoute) => {
+        savedRoutes = moveSavedRouteToTop(savedRoute.id);
         setActiveRoute(savedRoute, 'saved');
+    };
+
+    const renameRoute = (savedRoute: SavedRoute) => {
+        const nextName = window.prompt('Rename saved route', savedRoute.fileName)?.trim();
+
+        if (!nextName || nextName === savedRoute.fileName) {
+            return;
+        }
+
+        savedRoutes = renameSavedRoute(savedRoute.id, nextName);
+        const renamedRoute = savedRoutes.find(candidate => candidate.id === savedRoute.id);
+
+        if (renamedRoute && selectedSavedRouteId === savedRoute.id) {
+            setActiveRoute(renamedRoute, 'saved');
+        }
+    };
+
+    const removeSavedRoute = (savedRoute: SavedRoute) => {
+        savedRoutes = deleteSavedRoute(savedRoute.id);
+
+        if (selectedSavedRouteId !== savedRoute.id) {
+            return;
+        }
+
+        const nextRoute = savedRoutes[0] ?? null;
+
+        if (nextRoute) {
+            setActiveRoute(nextRoute, 'saved');
+            return;
+        }
+
+        clearMap();
+        route = null;
+        selectedSavedRouteId = '';
+        hasError = false;
+        status = 'Saved route deleted. Select an efbDPP file to show the first route segment on the map.';
     };
 
     const openRoutePlanner = () => {
@@ -287,8 +261,6 @@
 
         route = nextRoute;
         selectedSavedRouteId = '';
-        forecastByWaypoint = {};
-        activeForecastKey = '';
         drawRoute(nextRoute);
         status = `${file.name}: loaded first route segment, but local storage was unavailable.`;
     };
@@ -310,42 +282,8 @@
         route = null;
         savedRoutes = [];
         selectedSavedRouteId = '';
-        forecastByWaypoint = {};
-        activeForecastKey = '';
-        forecastStatus = '';
-        forecastHasError = false;
         hasError = false;
         status = 'Saved routes cleared. Select an efbDPP file to show the first route segment on the map.';
-    };
-
-    const showForecast = async (waypoint: Waypoint) => {
-        const key = waypointKey(waypoint);
-        activeForecastKey = activeForecastKey === key ? '' : key;
-
-        if (!activeForecastKey || forecastByWaypoint[key]) {
-            forecastStatus = '';
-            forecastHasError = false;
-            return;
-        }
-
-        loadingForecastKey = key;
-        forecastStatus = `Loading forecast for ${waypoint.name || `waypoint ${waypoint.rowIndex}`}...`;
-        forecastHasError = false;
-
-        try {
-            const forecast = await loadWaypointForecast(waypoint);
-            forecastByWaypoint = {
-                ...forecastByWaypoint,
-                [key]: forecast,
-            };
-            forecastStatus = '';
-        } catch (error) {
-            console.error(error);
-            forecastHasError = true;
-            forecastStatus = error instanceof Error ? error.message : 'Unable to load waypoint forecast.';
-        } finally {
-            loadingForecastKey = '';
-        }
     };
 
     const handleFileChange = async (event: Event) => {
@@ -445,16 +383,27 @@
     }
 
     .route-file {
-        display: flex;
-        min-height: 48px;
-        flex-direction: column;
-        align-items: flex-start;
-        justify-content: center;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
         border: 1px solid rgba(255, 255, 255, 0.18);
         border-radius: 8px;
         background: rgba(255, 255, 255, 0.06);
+        padding: 8px;
+    }
+
+    .route-file-main {
+        display: flex;
+        min-height: 44px;
+        min-width: 0;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        border: 0;
+        background: transparent;
         color: inherit;
-        padding: 8px 10px;
+        padding: 0;
         text-align: left;
     }
 
@@ -463,12 +412,27 @@
         background: rgba(47, 136, 255, 0.18);
     }
 
-    .route-file span {
+    .route-file-main span {
         max-width: 100%;
         overflow: hidden;
         font-weight: 700;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    .route-file-actions {
+        display: flex;
+        gap: 6px;
+    }
+
+    .route-file-actions button {
+        min-height: 34px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.22);
+        color: inherit;
+        padding: 0 8px;
+        font-weight: 700;
     }
 
     .route-library small {
@@ -503,9 +467,6 @@
     }
 
     .waypoint-card {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 88px;
-        gap: 8px;
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 8px;
         background: rgba(255, 255, 255, 0.06);
@@ -527,48 +488,6 @@
 
     .waypoint-list small {
         color: var(--color-grey);
-    }
-
-    .forecast-button {
-        min-height: 40px;
-        align-self: center;
-        border: 1px solid rgba(47, 136, 255, 0.7);
-        border-radius: 8px;
-        background: rgba(47, 136, 255, 0.16);
-        color: inherit;
-        font-weight: 700;
-    }
-
-    .forecast-button:disabled {
-        opacity: 0.65;
-    }
-
-    .forecast-panel {
-        grid-column: 1 / -1;
-        overflow-x: auto;
-    }
-
-    .forecast-table {
-        display: flex;
-        min-width: 1040px;
-        flex-direction: column;
-        gap: 1px;
-    }
-
-    .forecast-row {
-        display: grid;
-        grid-template-columns: 1.6fr 0.9fr repeat(10, 1fr);
-        gap: 8px;
-        border-radius: 4px;
-        background: rgba(0, 0, 0, 0.16);
-        padding: 7px 8px;
-        font-size: 12px;
-        line-height: 1.25;
-    }
-
-    .forecast-row--head {
-        color: var(--color-grey);
-        font-weight: 700;
     }
 
     :global(.efbdpp-marker) {

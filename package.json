@@ -1,6 +1,6 @@
 {
     "name": "windy-plugin-efbdpp-route",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "description": "Windy plugin for loading efbDPP flight plan files and displaying route waypoints.",
     "main": "dist/plugin.min.js",
     "type": "module",

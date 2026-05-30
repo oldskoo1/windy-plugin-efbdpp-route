@@ -9,15 +9,26 @@ const escapeXml = (value: string) =>
         .replace(/'/g, '&apos;');
 
 const waypointName = (waypoint: Waypoint, index: number) =>
-    waypoint.name || waypoint.sequence || `Waypoint ${index + 1}`;
+    [String(index + 1).padStart(3, '0'), waypoint.name || waypoint.sequence || 'Waypoint']
+        .join(' ')
+        .trim();
+
+const cleanRouteName = (route: FlightPlanRoute, fileName: string) => {
+    const fileBase = fileName.replace(/\.[^.]+$/, '').trim();
+    const parts = [route.flightId, route.flightDate, fileBase]
+        .map(part => String(part ?? '').trim())
+        .filter(Boolean);
+
+    return parts[0] || parts[1] || parts[2] || 'efbDPP Route';
+};
 
 export const routeToGpx = (route: FlightPlanRoute, name = 'efbDPP route') => {
-    const routeName = route.flightId || name;
+    const routeName = cleanRouteName(route, name);
     const routePoints = route.waypoints
         .map(
-            (waypoint, index) => `    <rtept lat="${waypoint.lat}" lon="${waypoint.lon}">
+            (waypoint, index) => `    <rtept lat="${waypoint.lat.toFixed(6)}" lon="${waypoint.lon.toFixed(6)}">
       <name>${escapeXml(waypointName(waypoint, index))}</name>
-      <desc>${escapeXml(`${waypoint.latRaw} / ${waypoint.lonRaw}`)}</desc>
+      <desc>${escapeXml(`efbDPP row ${waypoint.rowIndex}; ${waypoint.latRaw} / ${waypoint.lonRaw}`)}</desc>
     </rtept>`,
         )
         .join('\n');
