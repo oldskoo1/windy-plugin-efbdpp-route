@@ -19,6 +19,22 @@
             <p class:status-error={ hasError } class="status">{ status }</p>
         {/if}
 
+        {#if savedRoutes.length > 0}
+            <div class="route-library">
+                <label>
+                    <span>Recent routes</span>
+                    <select bind:value={ selectedSavedRouteId } on:change={ handleSavedRouteChange }>
+                        {#each savedRoutes as savedRoute}
+                            <option value={ savedRoute.id }>
+                                { savedRoute.fileName } · { savedRoute.route.waypoints.length } pts · { formatSavedTime(savedRoute.savedAt) }
+                            </option>
+                        {/each}
+                    </select>
+                </label>
+                <small>Latest { savedRoutes.length } of 10 uploads are kept on this device.</small>
+            </div>
+        {/if}
+
         {#if route}
             <div class="summary">
                 <strong>{ route.waypoints.length }</strong>
@@ -26,7 +42,7 @@
             </div>
 
             <button class="secondary-button" type="button" on:click={ clearRoute }>
-                Clear saved route
+                Clear saved routes
             </button>
 
             <div class="waypoint-list">
@@ -57,14 +73,22 @@
                                     <div class="forecast-table">
                                         <div class="forecast-row forecast-row--head">
                                             <span>Time</span>
+                                            <span>WX</span>
                                             <span>Temp</span>
                                             <span>Wind</span>
                                             <span>Gust</span>
                                             <span>Rain</span>
+                                            <span>Pressure</span>
+                                            <span>RH</span>
+                                            <span>Dew</span>
+                                            <span>Cloud base</span>
+                                            <span>Icing</span>
+                                            <span>Turb</span>
                                         </div>
                                         {#each forecastByWaypoint[waypointKey(waypoint)].rows as row}
                                             <div class="forecast-row">
                                                 <span>{ row.timeLabel }</span>
+                                                <span>{ formatForecastCode(row.weatherCode) }</span>
                                                 <span>{ formatForecastValue(row.tempC) }°C</span>
                                                 <span>
                                                     { formatForecastValue(row.windKt) } kt
@@ -74,6 +98,12 @@
                                                 </span>
                                                 <span>{ formatForecastValue(row.gustKt) } kt</span>
                                                 <span>{ formatForecastValue(row.precipMm, 1) } mm</span>
+                                                <span>{ formatForecastValue(row.pressureHpa) } hPa</span>
+                                                <span>{ formatForecastValue(row.humidityPct) }%</span>
+                                                <span>{ formatForecastValue(row.dewPointC) }°C</span>
+                                                <span>{ formatForecastValue(row.cloudBaseFt) } ft</span>
+                                                <span>{ formatForecastValue(row.icing, 1) }</span>
+                                                <span>{ formatForecastValue(row.turbulence, 1) }</span>
                                             </div>
                                         {/each}
                                     </div>
@@ -94,8 +124,15 @@
 
     import { parseEfbdpp, type FlightPlanRoute, type Waypoint } from './efbdppParser';
     import config from './pluginConfig';
-    import { clearSavedRoute, loadSavedRoute, saveRoute } from './routeStorage';
     import {
+        clearSavedRoutes,
+        loadLatestSavedRoute,
+        loadSavedRoutes,
+        saveRoute,
+        type SavedRoute,
+    } from './routeStorage';
+    import {
+        formatForecastCode,
         formatForecastValue,
         loadWaypointForecast,
         waypointKey,
@@ -109,11 +146,21 @@
     let hasError = false;
     let markers: L.Marker[] = [];
     let routeLine: L.Polyline | null = null;
+    let savedRoutes: SavedRoute[] = [];
+    let selectedSavedRouteId = '';
     let forecastByWaypoint: Record<string, WaypointForecast> = {};
     let activeForecastKey = '';
     let loadingForecastKey = '';
     let forecastStatus = '';
     let forecastHasError = false;
+
+    const formatSavedTime = (savedAt: string) =>
+        new Intl.DateTimeFormat(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        }).format(new Date(savedAt));
 
     const clearMap = () => {
         markers.forEach(marker => marker.remove());
@@ -167,6 +214,33 @@
         map.setView([waypoint.lat, waypoint.lon], Math.max(map.getZoom(), 8), { animate: true });
     };
 
+    const setActiveRoute = (savedRoute: SavedRoute, source: 'saved' | 'uploaded') => {
+        route = savedRoute.route;
+        selectedSavedRouteId = savedRoute.id;
+        forecastByWaypoint = {};
+        activeForecastKey = '';
+        forecastStatus = '';
+        forecastHasError = false;
+        drawRoute(savedRoute.route);
+        hasError = false;
+        status =
+            source === 'uploaded'
+                ? `${savedRoute.fileName}: loaded first route segment and saved locally.`
+                : `${savedRoute.fileName}: restored ${savedRoute.route.waypoints.length} waypoints.`;
+    };
+
+    const refreshSavedRoutes = () => {
+        savedRoutes = loadSavedRoutes();
+    };
+
+    const handleSavedRouteChange = () => {
+        const savedRoute = savedRoutes.find(candidate => candidate.id === selectedSavedRouteId);
+
+        if (savedRoute) {
+            setActiveRoute(savedRoute, 'saved');
+        }
+    };
+
     const loadFile = async (file: File) => {
         hasError = false;
         status = `Reading ${file.name}...`;
@@ -174,37 +248,46 @@
         const buffer = await file.arrayBuffer();
         const nextRoute = await parseEfbdpp(buffer);
 
+        const savedRoute = saveRoute(nextRoute, file.name);
+
+        refreshSavedRoutes();
+
+        if (savedRoute) {
+            setActiveRoute(savedRoute, 'uploaded');
+            return;
+        }
+
         route = nextRoute;
+        selectedSavedRouteId = '';
         forecastByWaypoint = {};
         activeForecastKey = '';
         drawRoute(nextRoute);
-        const saved = saveRoute(nextRoute);
-        status = `${file.name}: loaded first route segment${saved ? ' and saved locally' : ''}.`;
+        status = `${file.name}: loaded first route segment, but local storage was unavailable.`;
     };
 
     const restoreSavedRoute = () => {
-        const savedRoute = loadSavedRoute();
+        refreshSavedRoutes();
+        const savedRoute = loadLatestSavedRoute();
 
         if (!savedRoute) {
             return;
         }
 
-        route = savedRoute;
-        drawRoute(savedRoute);
-        hasError = false;
-        status = `Restored saved route with ${savedRoute.waypoints.length} waypoints.`;
+        setActiveRoute(savedRoute, 'saved');
     };
 
     const clearRoute = () => {
-        clearSavedRoute();
+        clearSavedRoutes();
         clearMap();
         route = null;
+        savedRoutes = [];
+        selectedSavedRouteId = '';
         forecastByWaypoint = {};
         activeForecastKey = '';
         forecastStatus = '';
         forecastHasError = false;
         hasError = false;
-        status = 'Saved route cleared. Select an efbDPP file to show the first route segment on the map.';
+        status = 'Saved routes cleared. Select an efbDPP file to show the first route segment on the map.';
     };
 
     const showForecast = async (waypoint: Waypoint) => {
@@ -318,6 +401,37 @@
         font-size: 24px;
     }
 
+    .route-library {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 8px;
+        padding: 10px;
+    }
+
+    .route-library label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-weight: 700;
+    }
+
+    .route-library select {
+        min-height: 40px;
+        max-width: 100%;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.28);
+        color: inherit;
+        padding: 0 8px;
+    }
+
+    .route-library small {
+        color: var(--color-grey);
+        line-height: 1.35;
+    }
+
     .secondary-button {
         min-height: 40px;
         border: 1px solid rgba(255, 255, 255, 0.16);
@@ -383,14 +497,14 @@
 
     .forecast-table {
         display: flex;
-        min-width: 520px;
+        min-width: 1040px;
         flex-direction: column;
         gap: 1px;
     }
 
     .forecast-row {
         display: grid;
-        grid-template-columns: 1.6fr repeat(4, 1fr);
+        grid-template-columns: 1.6fr 0.9fr repeat(10, 1fr);
         gap: 8px;
         border-radius: 4px;
         background: rgba(0, 0, 0, 0.16);

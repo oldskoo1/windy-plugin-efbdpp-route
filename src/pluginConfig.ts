@@ -2,7 +2,7 @@ import type { ExternalPluginConfig } from '@windy/interfaces';
 
 const config: ExternalPluginConfig = {
     name: 'windy-plugin-efbdpp-route',
-    version: '0.1.2',
+    version: '0.1.3',
     icon: '✈️',
     title: 'efbDPP Route',
     description: 'Load an efbDPP flight plan and display the first route segment on the Windy map.',

@@ -6,8 +6,8 @@ import type { Products } from '@windy/rootScope.d';
 import type { Waypoint } from './efbdppParser';
 
 const DEFAULT_FORECAST_MODEL: Products = 'ecmwf';
-const FORECAST_STEP = 3;
-const MAX_FORECAST_ROWS = 6;
+const FORECAST_STEP = 1;
+const MAX_FORECAST_ROWS = 8;
 
 export interface WaypointForecastRow {
     timestamp: number;
@@ -17,6 +17,13 @@ export interface WaypointForecastRow {
     gustKt: number | null;
     windDir: number | null;
     precipMm: number | null;
+    pressureHpa: number | null;
+    humidityPct: number | null;
+    dewPointC: number | null;
+    cloudBaseFt: number | null;
+    icing: number | null;
+    turbulence: number | null;
+    weatherCode: string | null;
 }
 
 export interface WaypointForecast {
@@ -33,6 +40,8 @@ const finiteOrNull = (value: unknown) =>
 
 const kelvinToCelsius = (value: number | null) => (value === null ? null : value - 273.15);
 const msToKnots = (value: number | null) => (value === null ? null : value * 1.943844);
+const paToHpa = (value: number | null) => (value === null ? null : value / 100);
+const metersToFeet = (value: number | null) => (value === null ? null : value * 3.28084);
 
 const formatTime = (timestamp: number) =>
     new Intl.DateTimeFormat(undefined, {
@@ -44,6 +53,8 @@ const formatTime = (timestamp: number) =>
 
 export const formatForecastValue = (value: number | null, digits = 0) =>
     value === null ? 'n/a' : value.toFixed(digits);
+
+export const formatForecastCode = (value: string | null) => value || 'n/a';
 
 export const loadWaypointForecast = async (
     waypoint: Waypoint,
@@ -64,6 +75,9 @@ export const loadWaypointForecast = async (
         const tempK = finiteOrNull(data.temp[index]);
         const wind = finiteOrNull(data.wind[index]);
         const gust = finiteOrNull(data.gust[index]);
+        const pressure = finiteOrNull(data.pressure[index]);
+        const dewPointK = finiteOrNull(data.dewPoint[index]);
+        const cloudBase = finiteOrNull(data.cbase?.[index]);
 
         return {
             timestamp,
@@ -73,6 +87,13 @@ export const loadWaypointForecast = async (
             gustKt: msToKnots(gust),
             windDir: finiteOrNull(data.windDir[index]),
             precipMm: finiteOrNull(data.mm[index]),
+            pressureHpa: paToHpa(pressure),
+            humidityPct: finiteOrNull(data.rh[index]),
+            dewPointC: kelvinToCelsius(dewPointK),
+            cloudBaseFt: metersToFeet(cloudBase),
+            icing: finiteOrNull(data.icing?.[index]),
+            turbulence: finiteOrNull(data.turbulence?.[index]),
+            weatherCode: typeof data.weathercode[index] === 'string' ? data.weathercode[index] : null,
         };
     });
 
