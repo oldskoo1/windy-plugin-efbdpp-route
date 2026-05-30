@@ -21,16 +21,22 @@
 
         {#if savedRoutes.length > 0}
             <div class="route-library">
-                <label>
-                    <span>Recent routes</span>
-                    <select bind:value={ selectedSavedRouteId } on:change={ handleSavedRouteChange }>
-                        {#each savedRoutes as savedRoute}
-                            <option value={ savedRoute.id }>
-                                { savedRoute.fileName } · { savedRoute.route.waypoints.length } pts · { formatSavedTime(savedRoute.savedAt) }
-                            </option>
-                        {/each}
-                    </select>
-                </label>
+                <strong>Recent routes</strong>
+                <div class="route-file-list">
+                    {#each savedRoutes as savedRoute}
+                        <button
+                            class:route-file--active={ savedRoute.id === selectedSavedRouteId }
+                            class="route-file"
+                            type="button"
+                            on:click={ () => loadSavedRoute(savedRoute) }
+                        >
+                            <span>{ savedRoute.fileName }</span>
+                            <small>
+                                { savedRoute.route.waypoints.length } pts · { formatSavedTime(savedRoute.savedAt) }
+                            </small>
+                        </button>
+                    {/each}
+                </div>
                 <small>Latest { savedRoutes.length } of 10 uploads are kept on this device.</small>
             </div>
         {/if}
@@ -40,6 +46,10 @@
                 <strong>{ route.waypoints.length }</strong>
                 <span>waypoints loaded</span>
             </div>
+
+            <button class="primary-action" type="button" on:click={ openRoutePlanner }>
+                Open in Route Planner
+            </button>
 
             <button class="secondary-button" type="button" on:click={ clearRoute }>
                 Clear saved routes
@@ -124,6 +134,7 @@
 
     import { parseEfbdpp, type FlightPlanRoute, type Waypoint } from './efbdppParser';
     import config from './pluginConfig';
+    import { routeToGpx } from './gpxExport';
     import {
         clearSavedRoutes,
         loadLatestSavedRoute,
@@ -233,11 +244,28 @@
         savedRoutes = loadSavedRoutes();
     };
 
-    const handleSavedRouteChange = () => {
-        const savedRoute = savedRoutes.find(candidate => candidate.id === selectedSavedRouteId);
+    const loadSavedRoute = (savedRoute: SavedRoute) => {
+        setActiveRoute(savedRoute, 'saved');
+    };
 
-        if (savedRoute) {
-            setActiveRoute(savedRoute, 'saved');
+    const openRoutePlanner = () => {
+        if (!route) {
+            return;
+        }
+
+        try {
+            const activeSavedRoute = savedRoutes.find(candidate => candidate.id === selectedSavedRouteId);
+            const content = routeToGpx(route, activeSavedRoute?.fileName);
+
+            bcast.emit('rqstOpen', 'rplanner', {
+                source: 'api',
+                import: true,
+                content,
+            } as never);
+        } catch (error) {
+            console.error(error);
+            hasError = true;
+            status = error instanceof Error ? error.message : 'Unable to open Windy Route Planner.';
         }
     };
 
@@ -404,32 +432,57 @@
     .route-library {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 8px;
         border: 1px solid rgba(255, 255, 255, 0.16);
         border-radius: 8px;
         padding: 10px;
     }
 
-    .route-library label {
+    .route-file-list {
         display: flex;
         flex-direction: column;
         gap: 6px;
-        font-weight: 700;
     }
 
-    .route-library select {
-        min-height: 40px;
-        max-width: 100%;
+    .route-file {
+        display: flex;
+        min-height: 48px;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
         border: 1px solid rgba(255, 255, 255, 0.18);
         border-radius: 8px;
-        background: rgba(0, 0, 0, 0.28);
+        background: rgba(255, 255, 255, 0.06);
         color: inherit;
-        padding: 0 8px;
+        padding: 8px 10px;
+        text-align: left;
+    }
+
+    .route-file--active {
+        border-color: rgba(47, 136, 255, 0.85);
+        background: rgba(47, 136, 255, 0.18);
+    }
+
+    .route-file span {
+        max-width: 100%;
+        overflow: hidden;
+        font-weight: 700;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .route-library small {
         color: var(--color-grey);
         line-height: 1.35;
+    }
+
+    .primary-action {
+        min-height: 44px;
+        border: 1px solid rgba(47, 136, 255, 0.7);
+        border-radius: 8px;
+        background: #2f88ff;
+        color: #fff;
+        font-weight: 700;
     }
 
     .secondary-button {

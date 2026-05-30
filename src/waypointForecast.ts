@@ -93,7 +93,7 @@ export const loadWaypointForecast = async (
             cloudBaseFt: metersToFeet(cloudBase),
             icing: finiteOrNull(data.icing?.[index]),
             turbulence: finiteOrNull(data.turbulence?.[index]),
-            weatherCode: typeof data.weathercode[index] === 'string' ? data.weathercode[index] : null,
+            weatherCode: typeof data.weathercode?.[index] === 'string' ? data.weathercode[index] : null,
         };
     });
 
